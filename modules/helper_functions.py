@@ -44,7 +44,7 @@ def display_random_images(dataloader: torch.utils.data.DataLoader,
 
         ax_img = axes[0, i] if n > 1 else axes[0]
         ax_img.imshow(img_np)
-        ax_img.set_title(f"Batch idx: {targ_sample}")
+        ax_img.set_title(f"Original image")
         ax_img.axis('off')
 
         ax_mask = axes[1, i] if n > 1 else axes[1]

@@ -5,7 +5,7 @@ from modules.helper_functions import walk_through_dir, display_random_images, pl
     create_writer
 from modules.data_preparation import create_dataloaders
 from modules.model_training import train
-from modules.predict import predict, visualize_predictions
+from modules.predict import predict, visualize_predictions, visualize_single_prediction, compare_models_predictions
 import segmentation_models_pytorch as smp
 from segmentation_models_pytorch.encoders import get_preprocessing_fn
 import albumentations as A
@@ -15,6 +15,7 @@ import os
 
 
 def main():
+    print(torch.__version__)
     # Device agnostic code
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -55,101 +56,155 @@ def main():
 
     BATCH_SIZE = 16
 
-    brisc_train_loader, brisc_val_loader, brisc_test_loader = create_dataloaders(dataset_path=brisc_dataset_path,
-                                                                                 train_transform=train_transform,
-                                                                                 test_transform=test_transform,
-                                                                                 batch_size=BATCH_SIZE)
+    ham_train_loader, ham_val_loader, ham_test_loader = create_dataloaders(dataset_path=ham_dataset_path,
+                                                                           train_transform=train_transform,
+                                                                           test_transform=test_transform,
+                                                                           batch_size=BATCH_SIZE)
 
-    dataloaders_info(brisc_train_loader, brisc_val_loader, brisc_test_loader, BATCH_SIZE)
-    display_random_images(brisc_train_loader)
+    # dataloaders_info(ham_train_loader, ham_val_loader, ham_test_loader, BATCH_SIZE)
+    # display_random_images(ham_train_loader)
+    #
+    # models = ["Segformer"]
+    # encoders = ["mobilenet_v2"]
+    # optimizers = ["AdamW"]
+    #
+    # EPOCHS = 50
+    # for model_name in models:
+    #     for encoder_name in encoders:
+    #         for optimizer_name in optimizers:
+    #             print("-" * 50 + "\n")
+    #
+    #             match (model_name):
+    #                 case "Unet":
+    #                     model = smp.Unet(encoder_name=encoder_name,
+    #                                      encoder_weights="imagenet",
+    #                                      in_channels=3,
+    #                                      classes=1).to(DEVICE)
+    #                 case "Unet++":
+    #                     model = smp.UnetPlusPlus(encoder_name=encoder_name,
+    #                                              encoder_weights="imagenet",
+    #                                              in_channels=3,
+    #                                              classes=1).to(DEVICE)
+    #                 case "Deeplabv3":
+    #                     model = smp.DeepLabV3(encoder_name=encoder_name,
+    #                                           encoder_weights="imagenet",
+    #                                           in_channels=3,
+    #                                           classes=1).to(DEVICE)
+    #                 case "Deeplabv3+":
+    #                     model = smp.DeepLabV3Plus(encoder_name=encoder_name,
+    #                                               encoder_weights="imagenet",
+    #                                               in_channels=3,
+    #                                               classes=1).to(DEVICE)
+    #                 case "Segformer":
+    #                     model = smp.Segformer(encoder_name=encoder_name,
+    #                                           encoder_weights="imagenet",
+    #                                           in_channels=3,
+    #                                           classes=1).to(DEVICE)
+    #
+    #             loss_fn = smp.losses.DiceLoss(mode="binary", from_logits=True)
+    #
+    #             if optimizer_name == "SGD":
+    #                 optimizer = torch.optim.SGD(params=model.parameters(), lr=0.1, momentum=0.9)
+    #             elif optimizer_name == "Adam":
+    #                 optimizer = torch.optim.Adam(params=model.parameters(), lr=0.001)
+    #             elif optimizer_name == "AdamW":
+    #                 optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.001)
+    #
+    #             train_results = train(model=model,
+    #                                   train_dataloader=ham_train_loader,
+    #                                   val_dataloader=ham_val_loader,
+    #                                   loss_fn=loss_fn,
+    #                                   optimizer=optimizer,
+    #                                   epochs=EPOCHS,
+    #                                   device=DEVICE,
+    #                                   writer=create_writer(dataset_name="ham",
+    #                                                        model_name=model_name,
+    #                                                        extra=f"{encoder_name}_{optimizer_name}"),
+    #                                   save_path=f"{MODEL_PATH}/ham_{model_name}_{encoder_name}_{optimizer_name}.pth")
+    #
+    #             train_csv_filename = f"train_ham_{model_name}_{encoder_name}_{optimizer_name}.csv"
+    #             train_csv_path = RESULTS_PATH / train_csv_filename
+    #
+    #             total_time = train_results.pop("total_time", 0)
+    #
+    #             train_df = pd.DataFrame(train_results)
+    #             train_df.to_csv(train_csv_path, index=False)
+    #
+    #             plot_loss_curves(results=train_results,
+    #                              title=f"ham_{model_name}_{encoder_name}_{optimizer_name}")
+    #
+    #             test_results = predict(model=model,
+    #                                    dataloader=ham_test_loader,
+    #                                    device=DEVICE)
+    #             test_results["model_name"] = model_name
+    #             test_results["encoder_name"] = encoder_name
+    #             test_results["optimizer"] = optimizer_name
+    #             test_results["dataset_name"] = "ham"
+    #
+    #             test_df = pd.DataFrame([test_results])
+    #
+    #             if not os.path.isfile(global_test_csv_path):
+    #                 test_df.to_csv(global_test_csv_path, index=False)
+    #             else:
+    #                 test_df.to_csv(global_test_csv_path, mode='a', header=False, index=False)
+    #
+    #             visualize_predictions(model=model,
+    #                                   dataloader=ham_test_loader,
+    #                                   device=DEVICE)
+    model_unet = smp.Unet(encoder_name="efficientnet-b0",
+                          encoder_weights="imagenet",
+                          in_channels=3,
+                          classes=1)
 
-    models = ["Segformer"]
-    encoders = ["resnet34", "efficientnet-b0", "mobilenet_v2"]
-    optimizers = ["SGD", "Adam", "AdamW"]
+    model_unet.load_state_dict(torch.load(MODEL_PATH / "ham_Unet_efficientnet-b0_Adam.pth"))
+    model_unet.to(DEVICE)
 
-    EPOCHS = 50
-    for model_name in models:
-        for encoder_name in encoders:
-            for optimizer_name in optimizers:
-                print("-" * 50 + "\n")
+    model_unetplusplus = smp.UnetPlusPlus(encoder_name="efficientnet-b0",
+                                          encoder_weights="imagenet",
+                                          in_channels=3,
+                                          classes=1)
 
-                match (model_name):
-                    case "Unet":
-                        model = smp.Unet(encoder_name=encoder_name,
-                                         encoder_weights="imagenet",
-                                         in_channels=3,
-                                         classes=1).to(DEVICE)
-                    case "Unet++":
-                        model = smp.UnetPlusPlus(encoder_name=encoder_name,
-                                                 encoder_weights="imagenet",
-                                                 in_channels=3,
-                                                 classes=1).to(DEVICE)
-                    case "Deeplabv3":
-                        model = smp.DeepLabV3(encoder_name=encoder_name,
-                                              encoder_weights="imagenet",
-                                              in_channels=3,
-                                              classes=1).to(DEVICE)
-                    case "Deeplabv3+":
-                        model = smp.DeepLabV3Plus(encoder_name=encoder_name,
-                                                  encoder_weights="imagenet",
-                                                  in_channels=3,
-                                                  classes=1).to(DEVICE)
-                    case "Segformer":
-                        model = smp.DeepLabV3Plus(encoder_name=encoder_name,
-                                                  encoder_weights="imagenet",
-                                                  in_channels=3,
-                                                  classes=1).to(DEVICE)
+    model_unetplusplus.load_state_dict(torch.load(MODEL_PATH / "ham_Unet++_efficientnet-b0_SGD.pth"))
+    model_unetplusplus.to(DEVICE)
 
-                loss_fn = smp.losses.DiceLoss(mode="binary", from_logits=True)
+    model_deeplab = smp.DeepLabV3(encoder_name="efficientnet-b0",
+                                  encoder_weights="imagenet",
+                                  in_channels=3,
+                                  classes=1)
 
-                if optimizer_name == "SGD":
-                    optimizer = torch.optim.SGD(params=model.parameters(), lr=0.1, momentum=0.9)
-                elif optimizer_name == "Adam":
-                    optimizer = torch.optim.Adam(params=model.parameters(), lr=0.001)
-                elif optimizer_name == "AdamW":
-                    optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.001)
+    model_deeplab.load_state_dict(torch.load(MODEL_PATH / "ham_Deeplabv3_efficientnet-b0_SGD.pth"))
+    model_deeplab.to(DEVICE)
 
-                train_results = train(model=model,
-                                      train_dataloader=brisc_train_loader,
-                                      val_dataloader=brisc_val_loader,
-                                      loss_fn=loss_fn,
-                                      optimizer=optimizer,
-                                      epochs=EPOCHS,
-                                      device=DEVICE,
-                                      writer=create_writer(dataset_name="brisc",
-                                                           model_name=model_name,
-                                                           extra=f"{encoder_name}_{optimizer_name}"),
-                                      save_path=f"{MODEL_PATH}/brisc_{model_name}_{encoder_name}_{optimizer_name}.pth")
+    model_deeplabplus = smp.DeepLabV3Plus(encoder_name="efficientnet-b0",
+                                          encoder_weights="imagenet",
+                                          in_channels=3,
+                                          classes=1)
 
-                train_csv_filename = f"train_brisc_{model_name}_{encoder_name}_{optimizer_name}.csv"
-                train_csv_path = RESULTS_PATH / train_csv_filename
+    model_deeplabplus.load_state_dict(torch.load(MODEL_PATH / "ham_Deeplabv3+_efficientnet-b0_SGD.pth"))
+    model_deeplabplus.to(DEVICE)
 
-                total_time = train_results.pop("total_time", 0)
+    model_segformer = smp.Segformer(encoder_name="efficientnet-b0",
+                                    encoder_weights="imagenet",
+                                    in_channels=3,
+                                    classes=1)
 
-                train_df = pd.DataFrame(train_results)
-                train_df.to_csv(train_csv_path, index=False)
+    model_segformer.load_state_dict(torch.load(MODEL_PATH / "ham_Segformer_efficientnet-b0_SGD.pth"))
+    model_segformer.to(DEVICE)
 
-                plot_loss_curves(results=train_results,
-                                 title=f"brisc_{model_name}_{encoder_name}_{optimizer_name}")
+    models = [
+        ("U-Net", model_unet),
+        ("U-Net++", model_unetplusplus),
+        ("DeepLab v3", model_deeplab),
+        ("DeepLab v3+", model_deeplabplus),
+        ("SegFormer", model_segformer)
+    ]
 
-                test_results = predict(model=model,
-                                       dataloader=brisc_test_loader,
-                                       device=DEVICE)
-                test_results["model_name"] = model_name
-                test_results["encoder_name"] = encoder_name
-                test_results["optimizer"] = optimizer_name
-                test_results["dataset_name"] = "brisc"
-
-                test_df = pd.DataFrame([test_results])
-
-                if not os.path.isfile(global_test_csv_path):
-                    test_df.to_csv(global_test_csv_path, index=False)
-                else:
-                    test_df.to_csv(global_test_csv_path, mode='a', header=False, index=False)
-
-                visualize_predictions(model=model,
-                                      dataloader=brisc_test_loader,
-                                      device=DEVICE)
+    compare_models_predictions(
+        models_with_names=models,
+        dataloader=ham_test_loader,
+        device=DEVICE,
+        seed=51
+    )
 
 
 if __name__ == '__main__':
