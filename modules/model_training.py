@@ -1,20 +1,23 @@
-import torch
-from tqdm import tqdm
-import segmentation_models_pytorch as smp
 import time
 
+import segmentation_models_pytorch as smp
+import torch
+from tqdm import tqdm
 
-def train_step(model: torch.nn.Module,
-               dataloader: torch.utils.data.DataLoader,
-               loss_fn,
-               optimizer: torch.optim.Optimizer,
-               device: torch.device):
+
+def train_step(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    loss_fn,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+):
     train_loss = 0
     all_tp, all_fp, all_fn, all_tn = [], [], [], []
 
     model.train()
 
-    for (X, y) in dataloader:
+    for X, y in dataloader:
         X, y = X.to(device), y.to(device)
         logits = model(X)
         loss = loss_fn(logits, y)
@@ -22,11 +25,13 @@ def train_step(model: torch.nn.Module,
 
         probs = torch.sigmoid(logits)
 
-        tp, fp, fn, tn = smp.metrics.get_stats(probs, y.long(), mode='binary', threshold=0.5)
-        all_tp.append(tp)
-        all_fp.append(fp)
-        all_fn.append(fn)
-        all_tn.append(tn)
+        tp, fp, fn, tn = smp.metrics.get_stats(
+            probs, y.long(), mode="binary", threshold=0.5
+        )
+        all_tp.append(tp.cpu())
+        all_fp.append(fp.cpu())
+        all_fn.append(fn.cpu())
+        all_tn.append(tn.cpu())
 
         optimizer.zero_grad()
         loss.backward()
@@ -39,22 +44,26 @@ def train_step(model: torch.nn.Module,
     all_fn = torch.cat(all_fn)
     all_tn = torch.cat(all_tn)
 
-    metric_iou = smp.metrics.iou_score(all_tp, all_fp, all_fn, all_tn, reduction="micro")
+    metric_iou = smp.metrics.iou_score(
+        all_tp, all_fp, all_fn, all_tn, reduction="micro"
+    )
     metric_f1 = smp.metrics.f1_score(all_tp, all_fp, all_fn, all_tn, reduction="micro")
 
     return train_loss, metric_iou.item(), metric_f1.item()
 
 
-def val_step(model: torch.nn.Module,
-             dataloader: torch.utils.data.DataLoader,
-             loss_fn,
-             device: torch.device):
+def val_step(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    loss_fn,
+    device: torch.device,
+):
     val_loss = 0
     all_tp, all_fp, all_fn, all_tn = [], [], [], []
 
     model.eval()
     with torch.inference_mode():
-        for (X, y) in dataloader:
+        for X, y in dataloader:
             X, y = X.to(device), y.to(device)
             logits = model(X)
             loss = loss_fn(logits, y)
@@ -62,11 +71,13 @@ def val_step(model: torch.nn.Module,
 
             probs = torch.sigmoid(logits)
 
-            tp, fp, fn, tn = smp.metrics.get_stats(probs, y.long(), mode='binary', threshold=0.5)
-            all_tp.append(tp)
-            all_fp.append(fp)
-            all_fn.append(fn)
-            all_tn.append(tn)
+            tp, fp, fn, tn = smp.metrics.get_stats(
+                probs, y.long(), mode="binary", threshold=0.5
+            )
+            all_tp.append(tp.cpu())
+            all_fp.append(fp.cpu())
+            all_fn.append(fn.cpu())
+            all_tn.append(tn.cpu())
 
     val_loss /= len(dataloader)
 
@@ -75,31 +86,37 @@ def val_step(model: torch.nn.Module,
     all_fn = torch.cat(all_fn)
     all_tn = torch.cat(all_tn)
 
-    metric_iou = smp.metrics.iou_score(all_tp, all_fp, all_fn, all_tn, reduction="micro")
+    metric_iou = smp.metrics.iou_score(
+        all_tp, all_fp, all_fn, all_tn, reduction="micro"
+    )
     metric_f1 = smp.metrics.f1_score(all_tp, all_fp, all_fn, all_tn, reduction="micro")
 
     return val_loss, metric_iou.item(), metric_f1.item()
 
 
-def train(model: torch.nn.Module,
-          train_dataloader: torch.utils.data.DataLoader,
-          val_dataloader: torch.utils.data.DataLoader,
-          loss_fn,
-          optimizer: torch.optim.Optimizer,
-          epochs: int,
-          device: torch.device,
-          writer: torch.utils.tensorboard.writer.SummaryWriter,
-          save_path: str,
-          patience: int = 5):
-    results = {"train_loss": [],
-               "train_iou": [],
-               "train_f1": [],
-               "val_loss": [],
-               "val_iou": [],
-               "val_f1": [],
-               "train_time_per_epoch": [],
-               "val_time_per_epoch": [],
-               "total_time": 0}
+def train(
+    model: torch.nn.Module,
+    train_dataloader: torch.utils.data.DataLoader,
+    val_dataloader: torch.utils.data.DataLoader,
+    loss_fn,
+    optimizer: torch.optim.Optimizer,
+    epochs: int,
+    device: torch.device,
+    writer: torch.utils.tensorboard.writer.SummaryWriter,
+    save_path: str,
+    patience: int = 5,
+):
+    results = {
+        "train_loss": [],
+        "train_iou": [],
+        "train_f1": [],
+        "val_loss": [],
+        "val_iou": [],
+        "val_f1": [],
+        "train_time_per_epoch": [],
+        "val_time_per_epoch": [],
+        "total_time": 0,
+    }
 
     total_start_time = time.time()
 
@@ -108,18 +125,19 @@ def train(model: torch.nn.Module,
 
     for epoch in tqdm(range(epochs)):
         train_start = time.time()
-        train_loss, train_iou, train_f1 = train_step(model=model,
-                                                     dataloader=train_dataloader,
-                                                     loss_fn=loss_fn,
-                                                     optimizer=optimizer,
-                                                     device=device)
+        train_loss, train_iou, train_f1 = train_step(
+            model=model,
+            dataloader=train_dataloader,
+            loss_fn=loss_fn,
+            optimizer=optimizer,
+            device=device,
+        )
         train_end = time.time()
 
         val_start = time.time()
-        val_loss, val_iou, val_f1 = val_step(model=model,
-                                             dataloader=val_dataloader,
-                                             loss_fn=loss_fn,
-                                             device=device)
+        val_loss, val_iou, val_f1 = val_step(
+            model=model, dataloader=val_dataloader, loss_fn=loss_fn, device=device
+        )
         val_end = time.time()
 
         epoch_train_time = train_end - train_start
@@ -128,7 +146,8 @@ def train(model: torch.nn.Module,
         print(
             f"Epoch {epoch + 1}/{epochs}\n"
             f"Train loss: {train_loss:.4f} | Train IoU: {train_iou:.4f} | Train F1: {train_f1:.4f} | Time: {epoch_train_time:.1f}s\n"
-            f"Val loss: {val_loss:.4f} | Val IoU: {val_iou:.4f} | Val F1: {val_f1:.4f} | Time: {epoch_val_time:.1f}s\n")
+            f"Val loss: {val_loss:.4f} | Val IoU: {val_iou:.4f} | Val F1: {val_f1:.4f} | Time: {epoch_val_time:.1f}s\n"
+        )
         results["train_loss"].append(train_loss)
         results["train_iou"].append(train_iou)
         results["train_f1"].append(train_f1)
@@ -139,18 +158,21 @@ def train(model: torch.nn.Module,
         results["val_time_per_epoch"].append(epoch_val_time)
 
         if writer:
-            writer.add_scalars(main_tag="Loss",
-                               tag_scalar_dict={"train_loss": train_loss,
-                                                "val_loss": val_loss},
-                               global_step=epoch)
-            writer.add_scalars(main_tag="IoU",
-                               tag_scalar_dict={"train_iou": train_iou,
-                                                "val_iou": val_iou},
-                               global_step=epoch)
-            writer.add_scalars(main_tag="F1 Score",
-                               tag_scalar_dict={"train_f1": train_f1,
-                                                "val_f1": val_f1},
-                               global_step=epoch)
+            writer.add_scalars(
+                main_tag="Loss",
+                tag_scalar_dict={"train_loss": train_loss, "val_loss": val_loss},
+                global_step=epoch,
+            )
+            writer.add_scalars(
+                main_tag="IoU",
+                tag_scalar_dict={"train_iou": train_iou, "val_iou": val_iou},
+                global_step=epoch,
+            )
+            writer.add_scalars(
+                main_tag="F1 Score",
+                tag_scalar_dict={"train_f1": train_f1, "val_f1": val_f1},
+                global_step=epoch,
+            )
 
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1

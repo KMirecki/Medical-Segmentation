@@ -1,211 +1,172 @@
+from pathlib import Path
+
+import albumentations as A
+import pandas as pd
+import segmentation_models_pytorch as smp
 import torch
 from albumentations import ToTensorV2
-from pathlib import Path
-from modules.helper_functions import walk_through_dir, display_random_images, plot_loss_curves, dataloaders_info, \
-    create_writer
-from modules.data_preparation import create_dataloaders
-from modules.model_training import train
-from modules.predict import predict, visualize_predictions, visualize_single_prediction, compare_models_predictions
-import segmentation_models_pytorch as smp
 from segmentation_models_pytorch.encoders import get_preprocessing_fn
-import albumentations as A
-from torchinfo import summary
-import pandas as pd
-import os
+
+from modules.data_preparation import create_dataloaders
+from modules.helper_functions import create_writer, plot_training_curves
+from modules.model_training import train
+from modules.predict import predict
 
 
-def main():
-    print(torch.__version__)
-    # Device agnostic code
-    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+def get_model(
+    model_name: str, encoder_name: str, in_channels: int = 3, classes: int = 1
+) -> torch.nn.Module:
+    model_cls = {
+        "Unet": smp.Unet,
+        "Unet++": smp.UnetPlusPlus,
+        "Deeplabv3": smp.DeepLabV3,
+        "Deeplabv3+": smp.DeepLabV3Plus,
+        "Segformer": smp.Segformer,
+    }.get(model_name)
 
-    # Setting paths to datasets
-    data_path = Path("./datasets")
-    brisc_dataset_path = data_path / "brisc2025"
-    bus_uc_dataset_path = data_path / "BUS_UC"
-    ham_dataset_path = data_path / "HAM10000"
+    if model_cls is None:
+        raise ValueError(f"Unknown architecture: {model_name}")
 
-    # Print datasets info
-    walk_through_dir(brisc_dataset_path)
-    walk_through_dir(bus_uc_dataset_path)
-    walk_through_dir(ham_dataset_path)
-
-    MODEL_PATH = Path("models")
-    MODEL_PATH.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH = Path("results")
-    RESULTS_PATH.mkdir(parents=True, exist_ok=True)
-    global_test_csv_path = RESULTS_PATH / "tests.csv"
-
-    IMG_SIZE = 256
-    preprocess_input = get_preprocessing_fn(encoder_name='resnet34', pretrained='imagenet')
-
-    train_transform = A.Compose([
-        A.Resize(IMG_SIZE, IMG_SIZE),
-        A.HorizontalFlip(p=0.5),
-        A.Rotate(limit=15, p=0.5),
-        A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
-        A.Lambda(image=preprocess_input),
-        ToTensorV2()
-    ])
-
-    test_transform = A.Compose([
-        A.Resize(IMG_SIZE, IMG_SIZE),
-        A.Lambda(image=preprocess_input),
-        ToTensorV2()
-    ])
-
-    BATCH_SIZE = 16
-
-    ham_train_loader, ham_val_loader, ham_test_loader = create_dataloaders(dataset_path=ham_dataset_path,
-                                                                           train_transform=train_transform,
-                                                                           test_transform=test_transform,
-                                                                           batch_size=BATCH_SIZE)
-
-    # dataloaders_info(ham_train_loader, ham_val_loader, ham_test_loader, BATCH_SIZE)
-    # display_random_images(ham_train_loader)
-    #
-    # models = ["Segformer"]
-    # encoders = ["mobilenet_v2"]
-    # optimizers = ["AdamW"]
-    #
-    # EPOCHS = 50
-    # for model_name in models:
-    #     for encoder_name in encoders:
-    #         for optimizer_name in optimizers:
-    #             print("-" * 50 + "\n")
-    #
-    #             match (model_name):
-    #                 case "Unet":
-    #                     model = smp.Unet(encoder_name=encoder_name,
-    #                                      encoder_weights="imagenet",
-    #                                      in_channels=3,
-    #                                      classes=1).to(DEVICE)
-    #                 case "Unet++":
-    #                     model = smp.UnetPlusPlus(encoder_name=encoder_name,
-    #                                              encoder_weights="imagenet",
-    #                                              in_channels=3,
-    #                                              classes=1).to(DEVICE)
-    #                 case "Deeplabv3":
-    #                     model = smp.DeepLabV3(encoder_name=encoder_name,
-    #                                           encoder_weights="imagenet",
-    #                                           in_channels=3,
-    #                                           classes=1).to(DEVICE)
-    #                 case "Deeplabv3+":
-    #                     model = smp.DeepLabV3Plus(encoder_name=encoder_name,
-    #                                               encoder_weights="imagenet",
-    #                                               in_channels=3,
-    #                                               classes=1).to(DEVICE)
-    #                 case "Segformer":
-    #                     model = smp.Segformer(encoder_name=encoder_name,
-    #                                           encoder_weights="imagenet",
-    #                                           in_channels=3,
-    #                                           classes=1).to(DEVICE)
-    #
-    #             loss_fn = smp.losses.DiceLoss(mode="binary", from_logits=True)
-    #
-    #             if optimizer_name == "SGD":
-    #                 optimizer = torch.optim.SGD(params=model.parameters(), lr=0.1, momentum=0.9)
-    #             elif optimizer_name == "Adam":
-    #                 optimizer = torch.optim.Adam(params=model.parameters(), lr=0.001)
-    #             elif optimizer_name == "AdamW":
-    #                 optimizer = torch.optim.AdamW(params=model.parameters(), lr=0.001)
-    #
-    #             train_results = train(model=model,
-    #                                   train_dataloader=ham_train_loader,
-    #                                   val_dataloader=ham_val_loader,
-    #                                   loss_fn=loss_fn,
-    #                                   optimizer=optimizer,
-    #                                   epochs=EPOCHS,
-    #                                   device=DEVICE,
-    #                                   writer=create_writer(dataset_name="ham",
-    #                                                        model_name=model_name,
-    #                                                        extra=f"{encoder_name}_{optimizer_name}"),
-    #                                   save_path=f"{MODEL_PATH}/ham_{model_name}_{encoder_name}_{optimizer_name}.pth")
-    #
-    #             train_csv_filename = f"train_ham_{model_name}_{encoder_name}_{optimizer_name}.csv"
-    #             train_csv_path = RESULTS_PATH / train_csv_filename
-    #
-    #             total_time = train_results.pop("total_time", 0)
-    #
-    #             train_df = pd.DataFrame(train_results)
-    #             train_df.to_csv(train_csv_path, index=False)
-    #
-    #             plot_loss_curves(results=train_results,
-    #                              title=f"ham_{model_name}_{encoder_name}_{optimizer_name}")
-    #
-    #             test_results = predict(model=model,
-    #                                    dataloader=ham_test_loader,
-    #                                    device=DEVICE)
-    #             test_results["model_name"] = model_name
-    #             test_results["encoder_name"] = encoder_name
-    #             test_results["optimizer"] = optimizer_name
-    #             test_results["dataset_name"] = "ham"
-    #
-    #             test_df = pd.DataFrame([test_results])
-    #
-    #             if not os.path.isfile(global_test_csv_path):
-    #                 test_df.to_csv(global_test_csv_path, index=False)
-    #             else:
-    #                 test_df.to_csv(global_test_csv_path, mode='a', header=False, index=False)
-    #
-    #             visualize_predictions(model=model,
-    #                                   dataloader=ham_test_loader,
-    #                                   device=DEVICE)
-    model_unet = smp.Unet(encoder_name="efficientnet-b0",
-                          encoder_weights="imagenet",
-                          in_channels=3,
-                          classes=1)
-
-    model_unet.load_state_dict(torch.load(MODEL_PATH / "ham_Unet_efficientnet-b0_Adam.pth"))
-    model_unet.to(DEVICE)
-
-    model_unetplusplus = smp.UnetPlusPlus(encoder_name="efficientnet-b0",
-                                          encoder_weights="imagenet",
-                                          in_channels=3,
-                                          classes=1)
-
-    model_unetplusplus.load_state_dict(torch.load(MODEL_PATH / "ham_Unet++_efficientnet-b0_SGD.pth"))
-    model_unetplusplus.to(DEVICE)
-
-    model_deeplab = smp.DeepLabV3(encoder_name="efficientnet-b0",
-                                  encoder_weights="imagenet",
-                                  in_channels=3,
-                                  classes=1)
-
-    model_deeplab.load_state_dict(torch.load(MODEL_PATH / "ham_Deeplabv3_efficientnet-b0_SGD.pth"))
-    model_deeplab.to(DEVICE)
-
-    model_deeplabplus = smp.DeepLabV3Plus(encoder_name="efficientnet-b0",
-                                          encoder_weights="imagenet",
-                                          in_channels=3,
-                                          classes=1)
-
-    model_deeplabplus.load_state_dict(torch.load(MODEL_PATH / "ham_Deeplabv3+_efficientnet-b0_SGD.pth"))
-    model_deeplabplus.to(DEVICE)
-
-    model_segformer = smp.Segformer(encoder_name="efficientnet-b0",
-                                    encoder_weights="imagenet",
-                                    in_channels=3,
-                                    classes=1)
-
-    model_segformer.load_state_dict(torch.load(MODEL_PATH / "ham_Segformer_efficientnet-b0_SGD.pth"))
-    model_segformer.to(DEVICE)
-
-    models = [
-        ("U-Net", model_unet),
-        ("U-Net++", model_unetplusplus),
-        ("DeepLab v3", model_deeplab),
-        ("DeepLab v3+", model_deeplabplus),
-        ("SegFormer", model_segformer)
-    ]
-
-    compare_models_predictions(
-        models_with_names=models,
-        dataloader=ham_test_loader,
-        device=DEVICE,
-        seed=51
+    return model_cls(
+        encoder_name=encoder_name,
+        encoder_weights="imagenet",
+        in_channels=in_channels,
+        classes=classes,
     )
 
 
-if __name__ == '__main__':
+def get_optimizer(
+    optimizer_name: str, model_params, lr: float = 1e-3
+) -> torch.optim.Optimizer:
+    if optimizer_name == "SGD":
+        return torch.optim.SGD(params=model_params, lr=0.1, momentum=0.9)
+    if optimizer_name == "Adam":
+        return torch.optim.Adam(params=model_params, lr=lr)
+    if optimizer_name == "AdamW":
+        return torch.optim.AdamW(params=model_params, lr=lr)
+    raise ValueError(f"Unknown optimizer: {optimizer_name}")
+
+
+def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"PyTorch: {torch.__version__} | Device: {device}")
+
+    dataset_path = Path("./datasets/HAM10000")
+    dataset_name = "ham"
+
+    models_dir = Path("models")
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    results_dir = Path("results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    global_test_csv = results_dir / "tests.csv"
+
+    img_size = 256
+    batch_size = 16
+    epochs = 50
+    patience = 5
+
+    preprocess_input = get_preprocessing_fn("resnet34", pretrained="imagenet")
+
+    train_transform = A.Compose(
+        [
+            A.Resize(img_size, img_size),
+            A.HorizontalFlip(p=0.5),
+            A.Rotate(limit=15, p=0.5),
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+            A.Lambda(image=preprocess_input),
+            ToTensorV2(),
+        ]
+    )
+
+    eval_transform = A.Compose(
+        [
+            A.Resize(img_size, img_size),
+            A.Lambda(image=preprocess_input),
+            ToTensorV2(),
+        ]
+    )
+
+    train_loader, val_loader, test_loader = create_dataloaders(
+        dataset_path=dataset_path,
+        train_transform=train_transform,
+        eval_transform=eval_transform,
+        batch_size=batch_size,
+    )
+
+    models = ["Unet", "Unet++", "Deeplabv3", "Deeplabv3+", "Segformer"]
+    encoders = ["resnet34", "efficientnet-b0", "mobilenet_v2"]
+    optimizers = ["SGD", "Adam", "AdamW"]
+
+    loss_fn = smp.losses.DiceLoss(mode="binary", from_logits=True)
+
+    for model_name in models:
+        for encoder_name in encoders:
+            for opt_name in optimizers:
+                run_tag = f"{dataset_name}_{model_name}_{encoder_name}_{opt_name}"
+                model_save_path = str(models_dir / f"{run_tag}.pth")
+
+                print("\n" + "=" * 60)
+                print(f"Start: {run_tag}")
+                print("=" * 60)
+
+                model = get_model(model_name, encoder_name).to(device)
+                optimizer = get_optimizer(opt_name, model.parameters())
+                writer = create_writer(
+                    dataset_name=dataset_name,
+                    model_name=model_name,
+                    extra=f"{encoder_name}_{opt_name}",
+                )
+
+                train_results = train(
+                    model=model,
+                    train_dataloader=train_loader,
+                    val_dataloader=val_loader,
+                    loss_fn=loss_fn,
+                    optimizer=optimizer,
+                    epochs=epochs,
+                    device=device,
+                    writer=writer,
+                    save_path=model_save_path,
+                    patience=patience,
+                )
+
+                total_time = train_results.pop("total_time", 0)
+                train_df = pd.DataFrame(train_results)
+                train_df.to_csv(results_dir / f"train_{run_tag}.csv", index=False)
+
+                plot_training_curves(results=train_results, title=run_tag)
+
+                model.load_state_dict(
+                    torch.load(model_save_path, map_location=device, weights_only=True)
+                )
+
+                test_results = predict(
+                    model=model, dataloader=test_loader, device=device
+                )
+                test_results.update(
+                    {
+                        "model_name": model_name,
+                        "encoder_name": encoder_name,
+                        "optimizer": opt_name,
+                        "dataset_name": dataset_name,
+                        "total_time": total_time,
+                    }
+                )
+
+                test_df = pd.DataFrame([test_results])
+                write_header = not global_test_csv.exists()
+                test_df.to_csv(
+                    global_test_csv,
+                    mode="a",
+                    header=write_header,
+                    index=False,
+                )
+
+                print(
+                    f"Test F1: {test_results['test_f1']:.4f} | Test IoU: {test_results['test_iou']:.4f}"
+                )
+
+
+if __name__ == "__main__":
     main()
